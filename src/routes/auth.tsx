@@ -23,10 +23,8 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
-  const [mode, setMode] = useState<"login" | "setup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
   const { session, isAdmin, loading } = useAuth();
@@ -43,28 +41,12 @@ function AuthPage() {
     }
     setBusy(true);
     try {
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-        if (error) throw new Error("بيانات الدخول غير صحيحة");
-        toast.success("تم تسجيل الدخول");
-      } else {
-        if (password.length < 6) throw new Error("كلمة المرور يجب ألا تقل عن 6 أحرف");
-        if (!fullName.trim()) throw new Error("الاسم مطلوب");
-        const { error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            emailRedirectTo: window.location.origin,
-            data: { full_name: fullName.trim() },
-          },
-        });
-        if (error) throw new Error(error.message);
-        toast.success("تم إنشاء الحساب. سجّل الدخول الآن.");
-        setMode("login");
-      }
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) throw new Error("بيانات الدخول غير صحيحة");
+      toast.success("تم تسجيل الدخول");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "حدث خطأ");
     } finally {
@@ -84,21 +66,11 @@ function AuthPage() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>{mode === "login" ? "تسجيل الدخول" : "إنشاء حساب المدير الأول"}</CardTitle>
-            <CardDescription>
-              {mode === "login"
-                ? "أدخل بيانات حسابك للمتابعة"
-                : "أول حساب يتم إنشاؤه يصبح حساب المدير/المالك"}
-            </CardDescription>
+            <CardTitle>تسجيل الدخول</CardTitle>
+            <CardDescription>أدخل بيانات الحساب التي أنشأتها الإدارة للمتابعة</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={onSubmit} className="space-y-4">
-              {mode === "setup" && (
-                <div className="space-y-2">
-                  <Label htmlFor="name">الاسم بالكامل</Label>
-                  <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
-                </div>
-              )}
               <div className="space-y-2">
                 <Label htmlFor="email">البريد الإلكتروني</Label>
                 <Input
@@ -118,20 +90,13 @@ function AuthPage() {
                   dir="ltr"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                  autoComplete="current-password"
                 />
               </div>
               <Button type="submit" className="w-full" disabled={busy}>
-                {busy ? "جارٍ التنفيذ..." : mode === "login" ? "دخول" : "إنشاء الحساب"}
+                {busy ? "جارٍ الدخول..." : "دخول"}
               </Button>
             </form>
-            <button
-              type="button"
-              onClick={() => setMode(mode === "login" ? "setup" : "login")}
-              className="mt-4 w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline"
-            >
-              {mode === "login" ? "إعداد أول حساب مدير للنظام" : "لدي حساب بالفعل — تسجيل الدخول"}
-            </button>
           </CardContent>
         </Card>
       </div>

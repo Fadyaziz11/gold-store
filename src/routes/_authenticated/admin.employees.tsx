@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { errMsg, useBranches, useEmployees } from "@/lib/queries";
 import { EGP } from "@/lib/fmt";
@@ -11,11 +12,23 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Save } from "lucide-react";
+import { Save, UserPlus } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin/employees")({
   component: EmployeesAdmin,
 });
+
+const employeeAuth = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  },
+);
 
 function EmployeesAdmin() {
   const { data: employees } = useEmployees();
@@ -42,12 +55,54 @@ function EmployeesAdmin() {
     onError: (e) => toast.error(errMsg(e)),
   });
 
+  const createEmployee = useMutation({
+    mutationFn: async (p: {
+      fullName: string;
+      email: string;
+      password: string;
+      phone: string;
+      branchId: string;
+      salary: string;
+    }) => {
+      const { data, error } = await employeeAuth.auth.signUp({
+        email: p.email.trim(),
+        password: p.password,
+        options: { data: { full_name: p.fullName.trim() } },
+      });
+      if (error) throw error;
+      if (!data.user) throw new Error("تعذر إنشاء حساب الموظف");
+
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({
+          full_name: p.fullName.trim(),
+          email: p.email.trim(),
+          phone: p.phone.trim() || null,
+          branch_id: p.branchId === "none" ? null : p.branchId,
+          salary: Number(p.salary) || 0,
+          active: true,
+        })
+        .eq("id", data.user.id);
+      if (profileError) throw profileError;
+    },
+    onSuccess: () => {
+      toast.success("تم إنشاء حساب الموظف بنجاح");
+      qc.invalidateQueries({ queryKey: ["employees"] });
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-extrabold">إدارة الموظفين</h1>
       <p className="text-xs text-muted-foreground">
-        ينشئ الموظف حسابه من صفحة الدخول، ثم تقوم الإدارة هنا بتعيين الفرع والراتب وتفعيل الحساب.
+        المدير فقط ينشئ حسابات الموظفين ويحدد لكل موظف البريد وكلمة المرور والفرع والراتب.
       </p>
+      <CreateEmployeeCard
+        branches={branches ?? []}
+        busy={createEmployee.isPending}
+        onCreate={(p) => createEmployee.mutate(p)}
+      />
       <div className="grid gap-3 md:grid-cols-2">
         {(employees ?? []).map((e) => (
           <EmployeeCard
@@ -65,6 +120,8 @@ function EmployeesAdmin() {
   );
 }
 
+type Branch = { id: string; name: string };
+
 type Emp = {
   id: string;
   full_name: string;
@@ -75,13 +132,103 @@ type Emp = {
   active: boolean;
 };
 
+function CreateEmployeeCard({
+  branches,
+  busy,
+  onCreate,
+}: {
+  branches: Branch[];
+  busy: boolean;
+  onCreate: (p: {
+    fullName: string;
+    email: string;
+    password: string;
+    phone: string;
+    branchId: string;
+    salary: string;
+  }) => void;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [branchId, setBranchId] = useState("none");
+  const [salary, setSalary] = useState("0");
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fullName.trim() || !email.trim() || !password) {
+      toast.error("الاسم والبريد وكلمة المرور مطلوبة");
+      return;
+    }
+    if (password.length < 6) {
+      toast.error("كلمة مرور الموظف يجب ألا تقل عن 6 أحرف");
+      return;
+    }
+    onCreate({ fullName, email, password, phone, branchId, salary });
+    setFullName("");
+    setEmail("");
+    setPassword("");
+    setPhone("");
+    setBranchId("none");
+    setSalary("0");
+  }
+
+  return (
+    <Card className="border-primary/30 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <UserPlus className="size-5 text-primary" />
+        <div>
+          <h2 className="font-bold">إنشاء حساب موظف</h2>
+          <p className="text-xs text-muted-foreground">الحساب لا يُنشأ من صفحة الدخول العامة.</p>
+        </div>
+      </div>
+      <form onSubmit={submit} className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>اسم الموظف</Label>
+          <Input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>البريد الإلكتروني</Label>
+          <Input dir="ltr" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>كلمة المرور</Label>
+          <Input dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>رقم الهاتف</Label>
+          <Input dir="ltr" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>الفرع</Label>
+          <Select value={branchId} onValueChange={setBranchId}>
+            <SelectTrigger><SelectValue placeholder="اختر الفرع" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">بدون فرع</SelectItem>
+              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>الراتب الشهري</Label>
+          <Input dir="ltr" value={salary} onChange={(e) => setSalary(e.target.value)} />
+        </div>
+        <Button type="submit" className="md:col-span-2" disabled={busy}>
+          <UserPlus className="size-4" /> {busy ? "جارٍ إنشاء الحساب..." : "إنشاء حساب الموظف"}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
 function EmployeeCard({
   emp,
   branches,
   onSave,
 }: {
   emp: Emp;
-  branches: { id: string; name: string }[];
+  branches: Branch[];
   onSave: (p: {
     full_name: string;
     phone: string | null;
@@ -120,16 +267,10 @@ function EmployeeCard({
         <div className="space-y-2">
           <Label>الفرع</Label>
           <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger>
-              <SelectValue placeholder="اختر الفرع" />
-            </SelectTrigger>
+            <SelectTrigger><SelectValue placeholder="اختر الفرع" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">بدون فرع</SelectItem>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>
-                  {b.name}
-                </SelectItem>
-              ))}
+              {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
