@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { errMsg, useBranches, useEmployees } from "@/lib/queries";
 import { EGP } from "@/lib/fmt";
@@ -17,18 +16,6 @@ import { Save, UserPlus } from "lucide-react";
 export const Route = createFileRoute("/_authenticated/admin/employees")({
   component: EmployeesAdmin,
 });
-
-const employeeAuth = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-  },
-);
 
 function EmployeesAdmin() {
   const { data: employees } = useEmployees();
@@ -64,13 +51,24 @@ function EmployeesAdmin() {
       branchId: string;
       salary: string;
     }) => {
-      const { data, error } = await employeeAuth.auth.signUp({
-        email: p.email.trim(),
-        password: p.password,
-        options: { data: { full_name: p.fullName.trim() } },
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error("انتهت جلسة المدير، سجّل الدخول مرة أخرى");
+
+      const response = await fetch("/api/admin/create-employee", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          fullName: p.fullName.trim(),
+          email: p.email.trim(),
+          password: p.password,
+        }),
       });
-      if (error) throw error;
-      if (!data.user) throw new Error("تعذر إنشاء حساب الموظف");
+      const result = (await response.json().catch(() => ({}))) as { userId?: string; error?: string };
+      if (!response.ok || !result.userId) throw new Error(result.error ?? "تعذر إنشاء حساب الموظف");
 
       const { error: profileError } = await supabase
         .from("profiles")
@@ -82,7 +80,7 @@ function EmployeesAdmin() {
           salary: Number(p.salary) || 0,
           active: true,
         })
-        .eq("id", data.user.id);
+        .eq("id", result.userId);
       if (profileError) throw profileError;
     },
     onSuccess: () => {
