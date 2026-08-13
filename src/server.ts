@@ -19,6 +19,12 @@ let serverEntryPromise: Promise<ServerEntry> | undefined;
 
 const DEFAULT_SUPABASE_URL = "https://pjlfnhhogzheqesvkzdq.supabase.co";
 
+type ProcessLike = { env?: Record<string, string | undefined> };
+
+function runtimeProcessEnv(): Record<string, string | undefined> {
+  return ((globalThis as typeof globalThis & { process?: ProcessLike }).process?.env ?? {});
+}
+
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -29,13 +35,19 @@ function json(data: unknown, status = 200): Response {
 async function handleCreateEmployee(request: Request, env: WorkerEnv): Promise<Response | null> {
   if (request.method !== "POST" || new URL(request.url).pathname !== "/api/admin/create-employee") return null;
 
-  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  const processEnv = runtimeProcessEnv();
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY ?? processEnv.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceKey) return json({ error: "إعداد الخادم ناقص: SUPABASE_SERVICE_ROLE_KEY" }, 500);
 
   const accessToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
   if (!accessToken) return json({ error: "جلسة المدير مطلوبة" }, 401);
 
-  const supabaseUrl = env.SUPABASE_URL ?? env.VITE_SUPABASE_URL ?? DEFAULT_SUPABASE_URL;
+  const supabaseUrl =
+    env.SUPABASE_URL ??
+    env.VITE_SUPABASE_URL ??
+    processEnv.SUPABASE_URL ??
+    processEnv.VITE_SUPABASE_URL ??
+    DEFAULT_SUPABASE_URL;
   const adminClient = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
